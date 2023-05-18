@@ -17,11 +17,22 @@ from gpiozero import Button, LED
 from interactivity_config import button_pins_by_language, light_pins_by_language
 
 class ClipOverlapStrategy(str, Enum):
+    """
+    Strategies for what to do when a new clip is attempted to play while a clip is already playing.
+        abort: let the current clip finish, ignore the button
+        fadeout: trigger a fadeout, queue this clip to start playing after the fadeout. If there are
+                    other clips queued for the fadeout of the current clip, skip them.
+    """
     abort = "abort"
     fadeout = "fadeout"
 
 @dataclass
 class Language:
+    """
+    Representation of a language that consists of an audio clip (loaded into memory from a file) and
+    and option GPIO PIN that controls a relay that controls a light that should light up when the clip
+    for this language is playing. The light mappings are read from the interactivity_config.py file.
+    """
     name: str
     clip_path: InitVar[Path]
     light: LED|None = None
@@ -30,14 +41,16 @@ class Language:
 
     def __post_init__(self, clip_path: Path) -> None:
         self.clip, self.samplerate = sf.read(clip_path)
+        assert self.clip.ndim == 1, f"TRYING TO LOAD CLIP WITH MULTIPLE CHANNELS FOR: {self.name} -> {clip_path}"
 
 @dataclass
 class AudioDevice:
+    """
+    Representation of a single channel of an eligible system audio output device. Helps us treat
+    individual channels of a stereo output device as individual speakers.
+    """
     device_index: int
     channel: int
-
-    def __post_init__(self):
-        print(f"initialized with {self.device_index}:{self.channel}")
 
     @cache
     def __hash__(self):
@@ -45,6 +58,16 @@ class AudioDevice:
 
 @dataclass
 class ClipPlayer:
+    """
+    The main class responsible of orchestrating the following:
+        - Setting up the low-level audio playback threads.
+        - Playing clips when their corresponding buttons are played.
+        - Applying the clip overlap strategy:
+            - Either fade out the current clip gradually over the set number of seconds
+            - Or ignore the request to play a new clip if a different clip is still playing.
+        - Running a separate thread based on a timer that triggers a random language to play
+            if no interaction happens for a set amount of time.
+    """
     languages: list[Language]
     devices: list[AudioDevice]
     button_to_language: dict[Button, str] = field(default_factory=lambda: {})
@@ -64,12 +87,19 @@ class ClipPlayer:
     fadeout: bool = False
 
     def __post_init__(self):
+        """
+        Sets up the button interactions (as defined in interactivity_config.py)
+        Starts of the timed thread that plays a random clip if nothing happens for a given amount of time.
+        """
         self.set_fallback_timer()
         name_to_language = {language.name: language for language in self.languages}
         for button, language_name in self.button_to_language.items():
-            button.when_pressed = lambda: self.play_language(name_to_language[language_name])
+            button.when_pressed = lambda: self.play_language(name_to_language[language_name], abort_if_playing=False)
 
     def set_fallback_timer(self):
+        """
+        Helper function to reset the fallback timer thread. Is called at initialization time and every time a clip finishes playing.
+        """
         with self.fallback_lock:
             if self.fallback_timer:
                 self.fallback_timer.cancel()
@@ -78,6 +108,10 @@ class ClipPlayer:
             self.fallback_timer.start()
 
     def get_next_language(self) -> Language:
+        """
+        Get the next language that should be played randomly.
+        If there is more than one language available, picks a random language that's different from the last one.
+        """
         if len(self.languages) > 1:
             language_idx = random.choice(list(set(range(len(self.languages))) - set([self.last_language])))
         else:
@@ -86,40 +120,83 @@ class ClipPlayer:
         return self.languages[language_idx]
 
     def get_next_device(self) -> AudioDevice:
+        """
+        Get the next output device that should be used for audio playback.
+        If there is more than one device avaiablel, picks a random device that's different from the last one.
+        """
         if len(self.devices) > 1:
             device_idx = random.choice(list(set(range(len(self.devices))) - set([self.last_device])))
         else:
             device_idx = 0
         self.last_device = device_idx
-        print(f"picked idx {device_idx}")
-        print(f"picked device {self.devices[device_idx]}")
         return self.devices[device_idx]
 
     def play_random_language(self) -> None:
-        logging.info("Hit fallback timer, playing a random language")
-        self.play_language(self.get_next_language())
+        """
+        Triggers the playback of a random language. Is meant to  be used by the fallback timer thread.
+        Note that this always aborts playback if a different clip happens to be playing when this is called.
+        """
+        logging.info("Hit fallback timer, attempting to play a random language")
+        self.play_language(self.get_next_language(), abort_if_playing=True)
 
-    def play_language(self, language: Language) -> None:
-        assert language.clip.ndim == 1, "RECEIVED CLIP WITH MULTIPLE CHANNELS"
+    def play_language(self, language: Language, abort_if_playing:bool) -> None:
+        """
+        Attempts to play the given language in the system. This consists of the following:
+            1. Check if a different clip is currently playing.
+                - if yes, apply the clip overlap strategy:
+                    - if this function call or the overall strategy is set to abort when overlapping, return immediately
+                    - if the overall strategy is fadeout:
+                        i. Check if the currently playing clip is already in fadeout mode and a different clip is queued to play afterwards:
+                            - if yes, pre-empt(cancel) the queued clip
+                            - if no, set the currently playing clip to fade-out mode
+            2. Set up the thread to play this clip:
+                -  Define the play_ function that will run in its own thread to play this clip. This function:
+                    i. Checks if there is a different clip currently fading out:
+                        - TODO: probably want to play a chime here to acknowledge a new clip was queued.
+                        - if yes, block until the fadeout of the current clip is complete.
+                    ii. Checks if it has been pre-empted while waiting for the fadeout:
+                        - if yes, return immediately
+                    iii. Sets up the callback function to play the clip using the `sounddevice` library:
+                    iv. If any lights are tied to this language, turns them on.
+                    v. Starts the `sounddevice` playback using a custom callback function:
+                        - The fallback function writes audio data from an input buffer(the clip) to an output buffer(the audio device).
+                          It gets repeatedly called by the audiodevice library to keep buffering data from the clip to the device.
+                          It is given the output buffer, size of the output buffer, time since clip started playing and any underflow/overflow status.
+                          Every time it's invoked it does the following:
+                            a. Log any under/overflow issues
+                            b. Load the amount of samples that need to be written to the output buffer
+                            c. If fadeout is currently happening, compute how much each sample needs to be faded out:
+                                - TODO: this is currently buggy because the fadeout is linear between each callback call but logarithmic within.
+                                    Should change the approach so a single fadeout curve from fadeout start until end is computed once, and each
+                                    callback applies only the relevant region of the curve to its own sound data.
+                                - Use the fadeout start time, fadeout length, current frame start and end times to compute how much each frame needs to be scaled down.
+                                - Multiply the audio data with the coefficients to scale down the signal (this works because we have raw audio data in numpy arrays)
+                            d. If the remaining length of the clip is shorter than the buffer length, pad the buffer with 0s.
+                            e. If the last samples of the clip were written to the buffer in this call, or if the final fadeout time is reached, signal that playback should stop.
+                    vi. Waits for the stream to end.
+                    vii. Turns off any associated lights.
+                    viii. Resets the fallback timer.
+            3. Start the play thread.
+        """
+
         if self.current_playback_thread and self.current_playback_thread.is_alive():
             logging.info(f"Already playing a clip")
-            match self.clip_overlap_strategy:
-                case ClipOverlapStrategy.fadeout:
-                    with self.fadeout_lock:
-                        logging.info(f"initiating fadeout, to take {self.fadeout_length} seconds.")
-                        self.fadeout = True
-                        if self.fadeout_thread and self.fadeout_thread.is_alive():
-                            # there's already a thread fading out, so throw out the waiting thread.
-                            logging.info(f"Pre-empting waiting thread {self.current_playback_thread.native_id}")
-                            self.preempted_threads.add(self.current_playback_thread.native_id)
-                        else:
-                            # nothing is currenty fading out, that means current playback thread is actually playing
-                            # start fading it out
-                            self.fadeout_start_time = self.playback_stream.time
-                            self.fadeout_thread = self.current_playback_thread
-                case ClipOverlapStrategy.abort:
-                    logging.info(f"Already playing a clip, aborting clip playback.")
-                    return
+            if abort_if_playing or self.clip_overlap_strategy == ClipOverlapStrategy.abort:
+                logging.info(f"Already playing a clip, aborting clip playback.")
+                return
+            else:
+                with self.fadeout_lock:
+                    logging.info(f"initiating fadeout, to take {self.fadeout_length} seconds.")
+                    self.fadeout = True
+                    if self.fadeout_thread and self.fadeout_thread.is_alive():
+                        # there's already a thread fading out, so throw out the waiting thread.
+                        logging.info(f"Pre-empting waiting thread {self.current_playback_thread.native_id}")
+                        self.preempted_threads.add(self.current_playback_thread.native_id)
+                    else:
+                        # nothing is currenty fading out, that means current playback thread is actually playing
+                        # start fading it out
+                        self.fadeout_start_time = self.playback_stream.time
+                        self.fadeout_thread = self.current_playback_thread
         def _play():
             if self.fadeout_thread:
                 logging.info(f"currently fading out, waiting for fadeout")
@@ -183,12 +260,19 @@ class ClipPlayer:
         self.current_playback_thread.start()
 
 def get_devices(name_filter: str) -> list[AudioDevice]:
+    """
+    Use the `sounddevice` library to construct a list of all audio devices whose names contain the `name_filter` as a substring.
+    """
     devices = sd.query_devices()
     devices = [AudioDevice(device['index'], channel) for device in devices for channel in range(0,2) if name_filter in device["name"]]
-    print(f"found devices: {devices}")
+    logging.info(f"Initialized with devices: {devices}")
     return devices
 
 def get_languages(clips_dir: Path, clip_extension: str) -> list[Language]:
+    """
+    Initialize all languages by loading audio clips from `clips_dir` who have the `clip_extension` file extension.
+    Also load any light mappings from `interactivity_config.py`
+    """
     languages = []
     for clip_path in clips_dir.glob(f"**/*.{clip_extension}"):
         language = clip_path.stem
@@ -206,7 +290,7 @@ def main(
         clip_extension: str = "wav",
         sound_device_type: str = "USB Audio Device",
         fallback_time: int = 5 * 60,
-        fadeout_length: int = 5,
+        fadeout_length: int = 20,
         clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout,
         ):
     logging.basicConfig(level=logging.DEBUG)
@@ -221,13 +305,13 @@ def main(
             fadeout_length=fadeout_length,
             clip_overlap_strategy=clip_overlap_strategy
         )
+    # TESTING code:
     clip_player.play_random_language()
     time.sleep(1)
     clip_player.play_random_language()
-    clip_player.play_random_language()
-    clip_player.play_random_language()
-    time.sleep(3)
-    clip_player.play_random_language()
+    clip_player.play_language(languages[0], False)
+    time.sleep(8)
+    clip_player.play_language(languages[1], False)
 
 
 if __name__ == "__main__":
