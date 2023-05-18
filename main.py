@@ -36,7 +36,7 @@ class Language:
             light: LED | None,
             ) -> None:
         self.name = name
-        self.clip_path = clip_path
+        self.clip, self.samplerate = sf.read(clip_path)
         self.button = button
         self.light = light
         self.last_played = .0
@@ -66,12 +66,11 @@ class Language:
         LAST_SPEAKER = speaker_idx
         speaker = DEVICES[speaker_idx]
         logging.info(f"Playing {self.name} on {speaker}")
-        clip, samplerate = sf.read(self.clip_path)
         def _play():
             global FALLBACK_PLAY_TIMER
             if self.light:
                 self.light.on()
-            sd.play(clip, samplerate=samplerate, mapping=[speaker.channel], device=speaker.device_index, blocking=True)
+            sd.play(self.clip, samplerate=self.samplerate, mapping=[speaker.channel], device=speaker.device_index, blocking=True)
             if self.light:
                 self.light.off()
             with PLAYING_LOCK:
@@ -114,7 +113,7 @@ def trigger_random_language():
             logging.debug("Snap! Someone started playing a language already, giving up.")
             return
         if len(LANGUAGES) > 1:
-            next_language = random.choice((set(LANGUAGES) - set([LAST_LANGUAGE])))
+            next_language = random.choice(list((set(LANGUAGES) - set([LAST_LANGUAGE]))))
         else:
             next_language = LANGUAGES[0]
         logging.debug(f"Randomly picked {next_language.name} to play.")
