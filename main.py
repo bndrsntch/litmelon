@@ -199,7 +199,7 @@ class ClipPlayer:
                     else:
                         # nothing is currenty fading out, that means current playback thread is actually playing
                         # start fading it out
-                        self.fadeout_start_time = self.playback_stream.time
+                        self.fadeout_start_time = time.time()
                         self.fadeout_thread = self.current_playback_thread
         def _play():
             if self.fadeout_thread:
@@ -227,14 +227,14 @@ class ClipPlayer:
                 buffer_to_be_played = language.clip[current_frame:current_frame + chunksize]
                 with self.fadeout_lock:
                     if self.fadeout:
-                        fadeout_start_frame = self.fadeout_start_time #* language.samplerate
-                        frames_since_fadeout_start = max(0, current_frame - fadeout_start_frame)
+                        ms_since_fadeout_start = time.time() - self.fadeout_start_time
+                        frames_since_fadeout_start = max(0, (ms_since_fadeout_start / 1000) * language.samplerate)
                         fadeout_amounts = fadeout_curve[frames_since_fadeout_start:frames_since_fadeout_start + chunksize]
                         num_fadeout_frames = fadeout_amounts.shape[0]
                         num_buffer_frames = buffer_to_be_played.shape[0]
                         if  num_fadeout_frames < num_buffer_frames:
                             fadeout_amounts = np.pad(fadeout_amounts, (0, num_buffer_frames - num_fadeout_frames))
-                        logging.info(f"\n\tstart time: {self.fadeout_start_time}\n\tstart_frame:{fadeout_start_frame}\n\tcurrent frame:{current_frame}\n\tframes since fadeout:{frames_since_fadeout_start}\n\tavg fadeout:{np.mean(fadeout_amounts)}")
+                        logging.info(f"\n\tstart time: {self.fadeout_start_time}\n\tcurrent frame:{current_frame}\n\tframes since fadeout:{frames_since_fadeout_start}\n\tavg fadeout:{np.mean(fadeout_amounts)}")
                         buffer_to_be_played *= fadeout_amounts
                 outdata[:chunksize, device.channel] = buffer_to_be_played
                 if chunksize < buffersize:
