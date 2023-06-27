@@ -84,6 +84,7 @@ class ClipPlayer:
     fadeout_thread: threading.Thread|None = None
     preempted_threads: set[int] = field(default_factory=lambda: set())
     fadeout_lock: threading.RLock = field(default_factory=lambda: threading.RLock())
+    preemption_lock: threading.RLock = field(default_factory=lambda: threading.RLock())
     fadeout: bool = False
 
     def __post_init__(self):
@@ -142,14 +143,19 @@ class ClipPlayer:
     def play_language(self, language: Language, abort_if_playing:bool) -> None:
         """
         Attempts to play the given language in the system. This consists of the following:
-            1. Check if a different clip is currently playing.
+            1. Create a fadeout curve that will be used to fade this clip out if needed:
+                - The fadeout curve is an array of coefficients in (0,1) that scale down the value of each sample that plays.
+                    The number of frames needed is sample rate (samples per s) * fadeout time (s). We use numpy geomspace to
+                    exponentially fade out. The nth element of this array corresponds to how much quieter the nth sample that
+                    is played after fadeout is initiated should be.
+            2. Check if a different clip is currently playing.
                 - if yes, apply the clip overlap strategy:
                     - if this function call or the overall strategy is set to abort when overlapping, return immediately
                     - if the overall strategy is fadeout:
                         i. Check if the currently playing clip is already in fadeout mode and a different clip is queued to play afterwards:
                             - if yes, pre-empt(cancel) the queued clip
                             - if no, set the currently playing clip to fade-out mode
-            2. Set up the thread to play this clip:
+            3. Set up the thread to play this clip:
                 -  Define the play_ function that will run in its own thread to play this clip. This function:
                     i. Checks if there is a different clip currently fading out:
                         - TODO: probably want to play a chime here to acknowledge a new clip was queued.
@@ -166,10 +172,7 @@ class ClipPlayer:
                             a. Log any under/overflow issues
                             b. Load the amount of samples that need to be written to the output buffer
                             c. If fadeout is currently happening, compute how much each sample needs to be faded out:
-                                - TODO: this is currently buggy because the fadeout is linear between each callback call but logarithmic within.
-                                    Should change the approach so a single fadeout curve from fadeout start until end is computed once, and each
-                                    callback applies only the relevant region of the curve to its own sound data.
-                                - Use the fadeout start time, fadeout length, current frame start and end times to compute how much each frame needs to be scaled down.
+                                - Since we have a fadeout curve already, and the callback tells us which samples we're playing, we l
                                 - Multiply the audio data with the coefficients to scale down the signal (this works because we have raw audio data in numpy arrays)
                             d. If the remaining length of the clip is shorter than the buffer length, pad the buffer with 0s.
                             e. If the last samples of the clip were written to the buffer in this call, or if the final fadeout time is reached, signal that playback should stop.
@@ -178,20 +181,21 @@ class ClipPlayer:
                     viii. Resets the fallback timer.
             3. Start the play thread.
         """
-
+        fadeout_curve = np.linspace(1.0, 0, self.fadeout_length * language.samplerate)
         if self.current_playback_thread and self.current_playback_thread.is_alive():
             logging.info(f"Already playing a clip")
             if abort_if_playing or self.clip_overlap_strategy == ClipOverlapStrategy.abort:
                 logging.info(f"Already playing a clip, aborting clip playback.")
                 return
             else:
+                logging.info(f"initiating fadeout, to take {self.fadeout_length} seconds.")
                 with self.fadeout_lock:
-                    logging.info(f"initiating fadeout, to take {self.fadeout_length} seconds.")
                     self.fadeout = True
                     if self.fadeout_thread and self.fadeout_thread.is_alive():
                         # there's already a thread fading out, so throw out the waiting thread.
-                        logging.info(f"Pre-empting waiting thread {self.current_playback_thread.native_id}")
-                        self.preempted_threads.add(self.current_playback_thread.native_id)
+                        logging.debug(f"Pre-empting waiting thread {self.current_playback_thread.native_id}")
+                        with self.preemption_lock:
+                            self.preempted_threads.add(self.current_playback_thread.native_id)
                     else:
                         # nothing is currenty fading out, that means current playback thread is actually playing
                         # start fading it out
@@ -199,40 +203,41 @@ class ClipPlayer:
                         self.fadeout_thread = self.current_playback_thread
         def _play():
             if self.fadeout_thread:
-                logging.info(f"currently fading out, waiting for fadeout")
                 self.fadeout_thread.join()
-                with self.fadeout_lock:
+                self.fadeout = False
+                self.fadeout_start_time = None
+                self.fadeout_thread = None
+                with self.preemption_lock:
                     if threading.current_thread().native_id in self.preempted_threads:
-                        logging.info(f"Thread {threading.current_thread().native_id} was pre-empted, skipping playback.")
+                        logging.debug(f"Thread {threading.current_thread().native_id} was pre-empted, skipping playback.")
                         # This thread was preempted while waiting to play, just return without playing
                         return
-                    self.fadeout = False
-                    self.fadeout_start_time = None
-                    self.fadeout_threads = []
-                logging.info(f"fadeout complete, starting playback")
             global current_frame
             global device
             device = self.get_next_device()
             current_frame = 0
             playback_finished = threading.Event()
-            def callback(outdata, frames, time, status):
+            def callback(outdata, buffersize, time, status):
                 global current_frame
                 global device
                 if status:
                     logging.warn(status)
-                chunksize = min(len(language.clip) - current_frame, frames)
+                chunksize = min(len(language.clip) - current_frame, buffersize)
                 outdata[:chunksize, 1 - device.channel] = 0
                 buffer_to_be_played = language.clip[current_frame:current_frame + chunksize]
                 with self.fadeout_lock:
                     if self.fadeout:
-                        current_frame_length = chunksize / language.samplerate
-                        time_since_fadeout_started = time.currentTime - self.fadeout_start_time
-                        fadeout_amount_at_frame_start = 1.0 - (time_since_fadeout_started / self.fadeout_length)
-                        fadeout_amount_at_frame_end = 1.0 - (time_since_fadeout_started + current_frame_length) / self.fadeout_length
-                        fadeout_amounts = np.geomspace(fadeout_amount_at_frame_start, fadeout_amount_at_frame_end, chunksize)
+                        fadeout_start_frame = self.fadeout_start_time #* language.samplerate
+                        frames_since_fadeout_start = max(0, current_frame - fadeout_start_frame)
+                        fadeout_amounts = fadeout_curve[frames_since_fadeout_start:frames_since_fadeout_start + chunksize]
+                        num_fadeout_frames = fadeout_amounts.shape[0]
+                        num_buffer_frames = buffer_to_be_played.shape[0]
+                        if  num_fadeout_frames < num_buffer_frames:
+                            fadeout_amounts = np.pad(fadeout_amounts, (0, num_buffer_frames - num_fadeout_frames))
+                        logging.info(f"\n\tstart time: {self.fadeout_start_time}\n\tstart_frame:{fadeout_start_frame}\n\tcurrent frame:{current_frame}\n\tframes since fadeout:{frames_since_fadeout_start}\n\tavg fadeout:{np.mean(fadeout_amounts)}")
                         buffer_to_be_played *= fadeout_amounts
                 outdata[:chunksize, device.channel] = buffer_to_be_played
-                if chunksize < frames:
+                if chunksize < buffersize:
                     logging.info(f"DEVICE: {device} :: {language.name} end reached, shutting stream down.")
                     outdata[chunksize:,:] = 0
                     raise sd.CallbackStop()
@@ -307,11 +312,8 @@ def main(
         )
     # TESTING code:
     clip_player.play_random_language()
-    time.sleep(1)
-    clip_player.play_random_language()
+    time.sleep(2)
     clip_player.play_language(languages[0], False)
-    time.sleep(8)
-    clip_player.play_language(languages[1], False)
 
 
 if __name__ == "__main__":
