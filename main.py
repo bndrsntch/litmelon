@@ -217,7 +217,7 @@ class ClipPlayer:
             device = self.get_next_device()
             current_frame = 0
             playback_finished = threading.Event()
-            def callback(outdata, buffersize, time, status):
+            def callback(outdata, buffersize, stream_time, status):
                 global current_frame
                 global device
                 if status:
@@ -227,14 +227,14 @@ class ClipPlayer:
                 buffer_to_be_played = language.clip[current_frame:current_frame + chunksize]
                 with self.fadeout_lock:
                     if self.fadeout:
-                        ms_since_fadeout_start = time.time() - self.fadeout_start_time
-                        frames_since_fadeout_start = max(0, (ms_since_fadeout_start / 1000) * language.samplerate)
+                        current_time = time.time()
+                        ms_since_fadeout_start = current_time - self.fadeout_start_time
+                        frames_since_fadeout_start = max(0, int(ms_since_fadeout_start * language.samplerate))
                         fadeout_amounts = fadeout_curve[frames_since_fadeout_start:frames_since_fadeout_start + chunksize]
                         num_fadeout_frames = fadeout_amounts.shape[0]
                         num_buffer_frames = buffer_to_be_played.shape[0]
                         if  num_fadeout_frames < num_buffer_frames:
                             fadeout_amounts = np.pad(fadeout_amounts, (0, num_buffer_frames - num_fadeout_frames))
-                        logging.info(f"\n\tstart time: {self.fadeout_start_time}\n\tcurrent frame:{current_frame}\n\tframes since fadeout:{frames_since_fadeout_start}\n\tavg fadeout:{np.mean(fadeout_amounts)}")
                         buffer_to_be_played *= fadeout_amounts
                 outdata[:chunksize, device.channel] = buffer_to_be_played
                 if chunksize < buffersize:
@@ -242,7 +242,7 @@ class ClipPlayer:
                     outdata[chunksize:,:] = 0
                     raise sd.CallbackStop()
                 with self.fadeout_lock:
-                    if self.fadeout and time.currentTime > self.fadeout_start_time + self.fadeout_length:
+                    if self.fadeout and time.time() > self.fadeout_start_time + self.fadeout_length:
                         logging.info(f"DEVICE: {device} :: fadeout time reached, shutting stream down.")
                         self.fadeout = False
                         self.fadeout_start_time = None
@@ -261,8 +261,8 @@ class ClipPlayer:
                 logging.info("Resestting fallback clock")
                 self.set_fallback_timer()
         self.current_playback_thread = threading.Thread(target=_play)
-        logging.info(f"Starting playback thread {self.current_playback_thread.native_id} for {language.name}.")
         self.current_playback_thread.start()
+        logging.info(f"Starting playback thread {self.current_playback_thread.native_id} for {language.name}.")
 
 def get_devices(name_filter: str) -> list[AudioDevice]:
     """
@@ -313,7 +313,11 @@ def main(
     # TESTING code:
     clip_player.play_random_language()
     time.sleep(2)
-    clip_player.play_language(languages[0], False)
+    clip_player.play_language(clip_player.languages[1], False)
+    clip_player.play_random_language()
+    time.sleep(2)
+    clip_player.play_language(clip_player.languages[0], False)
+
 
 
 if __name__ == "__main__":
