@@ -312,12 +312,6 @@ def main(
         )
     # TESTING code:
     clip_player.play_random_language()
-    time.sleep(2)
-    clip_player.play_language(clip_player.languages[1], False)
-    clip_player.play_random_language()
-    time.sleep(2)
-    clip_player.play_language(clip_player.languages[0], False)
-
 
 
 if __name__ == "__main__":
