@@ -33,7 +33,7 @@ class ClipOverlapStrategy(str, Enum):
 @dataclass
 class Language:
     """
-    Representation of a language that consists of an audio clip (loaded into memory from a file) and
+    Representation of a language that consists of an audio clip (loaded into memory from a file)
     and option GPIO PIN that controls a relay that controls a light that should light up when the clip
     for this language is playing. The light mappings are read from the interactivity_config.py file.
     """
@@ -63,13 +63,13 @@ class AudioDevice:
 
     @cache
     def __hash__(self):
-        return (self.device_index, self.channel)
+        return self.device_index, self.channel
 
 
 @dataclass
 class ClipPlayer:
     """
-    The main class responsible of orchestrating the following:
+    The main class responsible for orchestrating the following:
         - Setting up the low-level audio playback threads.
         - Playing clips when their corresponding buttons are played.
         - Applying the clip overlap strategy:
@@ -112,7 +112,8 @@ class ClipPlayer:
 
     def set_fallback_timer(self):
         """
-        Helper function to reset the fallback timer thread. Is called at initialization time and every time a clip finishes playing.
+        Helper function to reset the fallback timer thread. Is called at initialization
+        time and every time a clip finishes playing.
         """
         with self.fallback_lock:
             if self.fallback_timer:
@@ -130,7 +131,7 @@ class ClipPlayer:
         """
         if len(self.languages) > 1:
             language_idx = random.choice(
-                list(set(range(len(self.languages))) - set([self.last_language]))
+                list(set(range(len(self.languages))) - {self.last_language})
             )
         else:
             language_idx = 0
@@ -140,11 +141,11 @@ class ClipPlayer:
     def get_next_device(self) -> AudioDevice:
         """
         Get the next output device that should be used for audio playback.
-        If there is more than one device avaiablel, picks a random device that's different from the last one.
+        If there is more than one device available, picks a random device that's different from the last one.
         """
         if len(self.devices) > 1:
             device_idx = random.choice(
-                list(set(range(len(self.devices))) - set([self.last_device]))
+                list(set(range(len(self.devices))) - {self.last_device})
             )
         else:
             device_idx = 0
@@ -163,15 +164,18 @@ class ClipPlayer:
         """
         Attempts to play the given language in the system. This consists of the following:
             1. Create a fadeout curve that will be used to fade this clip out if needed:
-                - The fadeout curve is an array of coefficients in (0,1) that scale down the value of each sample that plays.
-                    The number of frames needed is sample rate (samples per s) * fadeout time (s). We use numpy geomspace to
-                    exponentially fade out. The nth element of this array corresponds to how much quieter the nth sample that
-                    is played after fadeout is initiated should be.
+                - The fadeout curve is an array of coefficients in (0,1) that scale down
+                    the value of each sample that plays. The number of frames needed is
+                    sample rate (samples per s) * fadeout time (s). We use numpy geomspace to
+                    exponentially fade out. The nth element of this array corresponds to
+                    how much quieter the nth sample that is played after fadeout is initiated should be.
             2. Check if a different clip is currently playing.
                 - if yes, apply the clip overlap strategy:
-                    - if this function call or the overall strategy is set to abort when overlapping, return immediately
+                    - if this function call or the overall strategy is set to
+                        abort when overlapping, return immediately
                     - if the overall strategy is fadeout:
-                        i. Check if the currently playing clip is already in fadeout mode and a different clip is queued to play afterwards:
+                        i. Check if the currently playing clip is already in fadeout mode
+                             and a different clip is queued to play afterwards:
                             - if yes, pre-empt(cancel) the queued clip
                             - if no, set the currently playing clip to fade-out mode
             3. Set up the thread to play this clip:
@@ -184,17 +188,25 @@ class ClipPlayer:
                     iii. Sets up the callback function to play the clip using the `sounddevice` library:
                     iv. If any lights are tied to this language, turns them on.
                     v. Starts the `sounddevice` playback using a custom callback function:
-                        - The fallback function writes audio data from an input buffer(the clip) to an output buffer(the audio device).
-                          It gets repeatedly called by the audiodevice library to keep buffering data from the clip to the device.
-                          It is given the output buffer, size of the output buffer, time since clip started playing and any underflow/overflow status.
+                        - The fallback function writes audio data from an input buffer(the clip)
+                            to an output buffer(the audio device).
+                          It gets repeatedly called by the audiodevice library to
+                            keep buffering data from the clip to the device.
+                          It is given the output buffer, size of the output buffer,
+                            time since clip started playing and any underflow/overflow status.
                           Every time it's invoked it does the following:
                             a. Log any under/overflow issues
                             b. Load the amount of samples that need to be written to the output buffer
                             c. If fadeout is currently happening, compute how much each sample needs to be faded out:
-                                - Since we have a fadeout curve already, and the callback tells us which samples we're playing, we l
-                                - Multiply the audio data with the coefficients to scale down the signal (this works because we have raw audio data in numpy arrays)
-                            d. If the remaining length of the clip is shorter than the buffer length, pad the buffer with 0s.
-                            e. If the last samples of the clip were written to the buffer in this call, or if the final fadeout time is reached, signal that playback should stop.
+                                - Since we have a fadeout curve already, and the callback
+                                    tells us which samples we're playing, we l
+                                - Multiply the audio data with the coefficients to scale
+                                    down the signal (this works because we have raw audio data in numpy arrays)
+                            d. If the remaining length of the clip is shorter than the
+                                 buffer length, pad the buffer with 0s.
+                            e. If the last samples of the clip were written to the buffer
+                                 in this call, or if the final fadeout time is reached,
+                                signal that playback should stop.
                     vi. Waits for the stream to end.
                     vii. Turns off any associated lights.
                     viii. Resets the fallback timer.
@@ -227,7 +239,7 @@ class ClipPlayer:
                     else:
                         # nothing is currenty fading out, that means current playback thread is actually playing
                         # start fading it out
-                        self.fadeout_start_time = time.time()
+                        self.fadeout_start_time = int(time.time())
                         self.fadeout_thread = self.current_playback_thread
 
         def _play():
@@ -239,21 +251,22 @@ class ClipPlayer:
                 with self.preemption_lock:
                     if threading.current_thread().native_id in self.preempted_threads:
                         logging.debug(
-                            f"Thread {threading.current_thread().native_id} was pre-empted, skipping playback."
+                            f"Thread {threading.current_thread().native_id} was preempted, skipping playback."
                         )
                         # This thread was preempted while waiting to play, just return without playing
                         return
-            global current_frame
-            global device
+
             device = self.get_next_device()
             current_frame = 0
             playback_finished = threading.Event()
 
-            def callback(outdata, buffersize, stream_time, status):
-                global current_frame
-                global device
+            def callback(outdata, buffersize, _, status):
+                nonlocal current_frame
+                nonlocal device
+
                 if status:
-                    logging.warn(status)
+                    logging.warning(status)
+
                 chunksize = min(len(language.clip) - current_frame, buffersize)
                 outdata[:chunksize, 1 - device.channel] = 0
                 buffer_to_be_played = language.clip[
@@ -278,6 +291,7 @@ class ClipPlayer:
                                 (0, num_buffer_frames - num_fadeout_frames),
                             )
                         buffer_to_be_played *= fadeout_amounts
+
                 outdata[:chunksize, device.channel] = buffer_to_be_played
                 if chunksize < buffersize:
                     logging.info(
@@ -285,6 +299,7 @@ class ClipPlayer:
                     )
                     outdata[chunksize:, :] = 0
                     raise sd.CallbackStop()
+
                 with self.fadeout_lock:
                     if (
                         self.fadeout
@@ -296,6 +311,7 @@ class ClipPlayer:
                         self.fadeout = False
                         self.fadeout_start_time = None
                         raise sd.CallbackStop()
+
                 current_frame += chunksize
 
             self.playback_stream = sd.OutputStream(
@@ -313,6 +329,7 @@ class ClipPlayer:
             logging.info(f"{language.name} playback complete")
             if language.light:
                 language.light.off()
+
             with self.fallback_lock:
                 logging.info("Resestting fallback clock")
                 self.set_fallback_timer()
@@ -324,17 +341,25 @@ class ClipPlayer:
         )
 
 
-def get_devices(name_filter: str) -> list[AudioDevice]:
+def get_devices(
+    name_filter: str, fail_on_no_matches: bool = False
+) -> list[AudioDevice]:
     """
-    Use the `sounddevice` library to construct a list of all audio devices whose names contain the `name_filter` as a substring.
+    Use the `sounddevice` library to construct a list of all audio devices
+      whose names contain the `name_filter` as a substring.
     """
-    devices = sd.query_devices()
+    device_query_response = sd.query_devices()
     devices = [
         AudioDevice(device["index"], channel)
-        for device in devices
+        for device in device_query_response
         for channel in range(0, 2)
         if name_filter in device["name"]
     ]
+    if len(devices) == 0 and fail_on_no_matches:
+        possible_devices = [device["name"] for device in device_query_response]
+        logging.error(f"Possible device names [{','.join(possible_devices)}]")
+        raise Exception(f"No devices found for [{name_filter}]")
+
     logging.info(f"Initialized with devices: {devices}")
     return devices
 
@@ -357,8 +382,8 @@ def get_languages(clips_dir: Path, clip_extension: str) -> list[Language]:
     return languages
 
 
-def main(
-    clips_dir: Path = "clips",
+def run(
+    clips_dir: Path = Path("clips"),
     clip_extension: str = "mp3",
     sound_device_type: str = "USB Audio Device",
     fallback_time: int = 5 * 60,
@@ -367,7 +392,7 @@ def main(
 ):
     logging.basicConfig(level=logging.DEBUG)
     languages = get_languages(clips_dir, clip_extension)
-    devices = get_devices(sound_device_type)
+    devices = get_devices(sound_device_type, fail_on_no_matches=True)
     language_name_to_button = {
         language_name: Button(button_pin)
         for language_name, button_pin in button_pins_by_language.items()
@@ -384,5 +409,9 @@ def main(
     clip_player.play_random_language()
 
 
+def main() -> None:
+    typer.run(run)
+
+
 if __name__ == "__main__":
-    typer.run(main)
+    main()
