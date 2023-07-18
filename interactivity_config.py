@@ -9,6 +9,7 @@ keys_by_language: dict[str, str] = {
     "ingush": "g",
     "kabardian": "i",
     "kabyle": "j",
+    "kannada": "p",
     "kreyol": "k",
     "kurdish": "l",
     "llocano": "m",
