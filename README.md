@@ -20,13 +20,13 @@ The sound aspect can be tested on any computer.
 Invoke with
 
 ```
-python main.py --sound_device_type "default"
+python main.py --sound-device-type "default"
 ```
 
 Available CLI options are:
 
-- `clips-dir (clips/)`: where to look for audio clips
-- `clip-extension (wav)`: what file extension to load
+- `clips-dir (clips)`: where to look for audio clips
+- `clip-extension (mp3)`: what file extension to load
 - `sound-device-type (USB Audio Device)`: which audio devices should be loaded, only those with this argument as part of their name are loaded. See Audio Devices below
 - `fallback-time (300)`: Number of seconds of inactivity before the system starts playing a random clip by itself. Lower it to test things.
 - `fadeout-length (20)`: Number of seconds of fadeout to use when switching to a new clip. Only used if clip overlap strategy is fadeout.

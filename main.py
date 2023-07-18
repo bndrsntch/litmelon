@@ -292,7 +292,7 @@ def get_languages(clips_dir: Path, clip_extension: str) -> list[Language]:
 
 def main(
         clips_dir: Path = "clips",
-        clip_extension: str = "wav",
+        clip_extension: str = "mp3",
         sound_device_type: str = "USB Audio Device",
         fallback_time: int = 5 * 60,
         fadeout_length: int = 20,
