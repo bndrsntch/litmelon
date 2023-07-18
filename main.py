@@ -194,15 +194,14 @@ class ClipPlayer:
                     viii. Resets the fallback timer.
             3. Start the play thread.
         """
-        print(f"Gonna try playing  {language.name}")
+        logging.info(f"Start attempt to play {language.name}")
         fadeout_curve = np.linspace(1.0, 0, self.fadeout_length * language.samplerate)
         if self.current_playback_thread and self.current_playback_thread.is_alive():
-            print(f"Already playing a clip")
             if abort_if_playing or self.clip_overlap_strategy == ClipOverlapStrategy.abort:
-                print(f"Already playing a clip, aborting clip playback.")
+                logging.debug(f"Already playing a clip, aborting clip playback.")
                 return
             else:
-                print(f"initiating fadeout, to take {self.fadeout_length} seconds.")
+                logging.debug(f"Already playing a clip, start fadeout if needed and wait.")
                 with self.fadeout_lock:
                     self.fadeout = True
                     if self.fadeout_thread and self.fadeout_thread.is_alive():
@@ -213,14 +212,14 @@ class ClipPlayer:
                     else:
                         # nothing is currenty fading out, that means current playback thread is actually playing
                         # start fading it out
-                        print(f"Set fadeout start time for thread: {self.current_playback_thread.native_id}")
+                        logging.debug(f"Set fadeout start time for active playback thread {self.current_playback_thread.native_id}")
                         self.fadeout_start_time = time.time()
                         self.fadeout_thread = self.current_playback_thread
         def _play():
             if self.fadeout_thread:
-                print(f"{self.fadeout_thread.native_id} is fading out, wait!")
+                logging.debug(f"Playback thread {self.fadeout_thread.native_id} is fading out, wait!")
                 self.fadeout_thread.join()
-                print(f"{self.fadeout_thread.native_id} is done fading out, go ahead!!")
+                logging.debug(f"Playback thread {self.fadeout_thread.native_id} is done fading out, go ahead!!")
                 self.fadeout = False
                 self.fadeout_start_time = None
                 self.fadeout_thread = None
@@ -231,7 +230,6 @@ class ClipPlayer:
                         return
             global current_frame
             global device
-            print(f"About to get device for {self.current_playback_thread.native_id}")
             device = self.get_next_device()
             current_frame = 0
             playback_finished = threading.Event()
@@ -262,36 +260,30 @@ class ClipPlayer:
                         raise sd.CallbackStop()
                     with self.fadeout_lock:
                         if self.fadeout and time.time() > self.fadeout_start_time + self.fadeout_length:
-                            logging.info(f"DEVICE: {device} :: fadeout time reached, shutting stream down.")
+                            logging.info(f"DEVICE: {device} :: {language.name} fadeout time reached, shutting stream down.")
                             self.fadeout = False
                             self.fadeout_start_time = None
                             raise sd.CallbackStop()
                     current_frame += chunksize
                 except sd.CallbackStop:
-                    logging.info("stop playback")
                     raise sd.CallbackStop
                 except Exception as e:
-                    print(f"Playback error: {e.message}")
-                    logging.error(f"Playback error: {e.message}")
+                    logging.error(f"DEVICE: {device} :: {language.name} playback error: {e.message}")
                     raise sd.CallbackStop()
             self.playback_stream = sd.OutputStream(samplerate=language.samplerate, device=device.device_index, channels=2, callback=callback, finished_callback=playback_finished.set)
             if language.light:
                 language.light.on()
-            print(f"About to start stream for {self.current_playback_thread.native_id}")
             with self.playback_stream:
-                print("Wait for playback to finish")
                 playback_finished.wait()
-                print("playback finished event set")
             self.playback_stream = None
-            logging.info(f"{language.name} playback complete")
             if language.light:
                 language.light.off()
             with self.fallback_lock:
-                logging.info("Resestting fallback clock")
+                logging.debug("Resestting fallback clock")
                 self.set_fallback_timer()
         self.current_playback_thread = threading.Thread(target=_play)
         self.current_playback_thread.start()
-        print(f"Started playback thread {self.current_playback_thread.native_id} for {language.name}.")
+        logging.info(f"Started playback thread {self.current_playback_thread.native_id} for {language.name}.")
 
 def get_devices(name_filter: str) -> list[AudioDevice]:
     """
