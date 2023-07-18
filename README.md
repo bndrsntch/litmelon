@@ -11,8 +11,8 @@ pip install -r requirements.txt
 
 ## Audio Clips
 
-The repo comes with a clip in turkish in the `clips` directory for easy testing.
-Copy more `.wav` files into the `clips` directory to test with more languages. Make sure the clips are MONO.
+The repo comes with a clip in cebuano in the `clips` directory for easy testing.
+Copy more `.mp3` files into the `clips` directory to test with more languages. Make sure the clips are MONO.
 
 ## Running
 
@@ -27,9 +27,9 @@ Available CLI options are:
 
 - `clips-dir (clips)`: where to look for audio clips
 - `clip-extension (mp3)`: what file extension to load
-- `sound-device-type (USB Audio Device)`: which audio devices should be loaded, only those with this argument as part of their name are loaded. See Audio Devices below
-- `fallback-time (300)`: Number of seconds of inactivity before the system starts playing a random clip by itself. Lower it to test things.
-- `fadeout-length (20)`: Number of seconds of fadeout to use when switching to a new clip. Only used if clip overlap strategy is fadeout.
+- `sound-device-type (default)`: which audio devices should be loaded, only those with this argument as part of their name are loaded. See Audio Devices below
+- `fallback-time (30)`: Number of seconds of inactivity before the system starts playing a random clip by itself. Lower it to test things.
+- `fadeout-length (10)`: Number of seconds of fadeout to use when switching to a new clip. Only used if clip overlap strategy is fadeout.
 - `clip-overlap-strategy (*fadeout*|abort)`: What to do if a new clip is requested (via button press) while a clip is already playing. Fadeout fades the current clip out and starts playing the new clip, abort does nothing, not allowing new clips to be triggered until the current clip ends.
 
 ## Audio Devices

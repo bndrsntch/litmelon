@@ -314,7 +314,7 @@ def get_languages(clips_dir: Path, clip_extension: str) -> list[Language]:
 def main(
         clips_dir: Path = "clips",
         clip_extension: str = "mp3",
-        sound_device_type: str = "MOTU Phones",
+        sound_device_type: str = "default",
         fallback_time: int = 30,
         fadeout_length: int = 10,
         clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout,
