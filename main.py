@@ -11,15 +11,16 @@ import typer
 import soundfile as sf
 import sounddevice as sd
 import numpy as np
+from pynput import keyboard
 
-from gpiozero import Button, LED
+from gpiozero import LED
 
-from interactivity_config import button_pins_by_language, light_pins_by_language
+from interactivity_config import keys_by_language, light_pins_by_language
 
 class ClipOverlapStrategy(str, Enum):
     """
     Strategies for what to do when a new clip is attempted to play while a clip is already playing.
-        abort: let the current clip finish, ignore the button
+        abort: let the current clip finish, ignore the key press
         fadeout: trigger a fadeout, queue this clip to start playing after the fadeout. If there are
                     other clips queued for the fadeout of the current clip, skip them.
     """
@@ -61,7 +62,7 @@ class ClipPlayer:
     """
     The main class responsible of orchestrating the following:
         - Setting up the low-level audio playback threads.
-        - Playing clips when their corresponding buttons are played.
+        - Playing clips when their corresponding keys are played.
         - Applying the clip overlap strategy:
             - Either fade out the current clip gradually over the set number of seconds
             - Or ignore the request to play a new clip if a different clip is still playing.
@@ -70,7 +71,7 @@ class ClipPlayer:
     """
     languages: list[Language]
     devices: list[AudioDevice]
-    button_to_language: dict[Button, str] = field(default_factory=lambda: {})
+    key_to_language: dict[str, str] = field(default_factory=lambda: {})
     fallback_time: int = 600 # seconds of silence before random clip is played
     fadeout_length: int = 5 # seconds
     clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout
@@ -89,13 +90,23 @@ class ClipPlayer:
 
     def __post_init__(self):
         """
-        Sets up the button interactions (as defined in interactivity_config.py)
+        Sets up the key interactions (as defined in interactivity_config.py)
         Starts of the timed thread that plays a random clip if nothing happens for a given amount of time.
         """
         self.set_fallback_timer()
-        name_to_language = {language.name: language for language in self.languages}
-        for button, language_name in self.button_to_language.items():
-            button.when_pressed = lambda: self.play_language(name_to_language[language_name], abort_if_playing=False)
+        listener = keyboard.Listener(on_release=lambda key:self.on_key_press(key))
+        listener.start()
+        self.name_to_language = {language.name: language for language in self.languages}
+
+    def on_key_press(self, key):
+        try:
+            char = str(key.char)
+            print(f"Got key: {char}")
+            language_name = self.key_to_language[char]
+            language = self.name_to_language[language_name]
+            self.play_language(language, abort_if_playing=False)
+        except AttributeError:
+            pass
 
     def set_fallback_timer(self):
         """
@@ -181,14 +192,15 @@ class ClipPlayer:
                     viii. Resets the fallback timer.
             3. Start the play thread.
         """
+        print(f"PLAY {language.name}")
         fadeout_curve = np.linspace(1.0, 0, self.fadeout_length * language.samplerate)
         if self.current_playback_thread and self.current_playback_thread.is_alive():
-            logging.info(f"Already playing a clip")
+            print(f"Already playing a clip")
             if abort_if_playing or self.clip_overlap_strategy == ClipOverlapStrategy.abort:
-                logging.info(f"Already playing a clip, aborting clip playback.")
+                print(f"Already playing a clip, aborting clip playback.")
                 return
             else:
-                logging.info(f"initiating fadeout, to take {self.fadeout_length} seconds.")
+                print(f"initiating fadeout, to take {self.fadeout_length} seconds.")
                 with self.fadeout_lock:
                     self.fadeout = True
                     if self.fadeout_thread and self.fadeout_thread.is_alive():
@@ -262,7 +274,7 @@ class ClipPlayer:
                 self.set_fallback_timer()
         self.current_playback_thread = threading.Thread(target=_play)
         self.current_playback_thread.start()
-        logging.info(f"Starting playback thread {self.current_playback_thread.native_id} for {language.name}.")
+        print(f"Starting playback thread {self.current_playback_thread.native_id} for {language.name}.")
 
 def get_devices(name_filter: str) -> list[AudioDevice]:
     """
@@ -282,7 +294,7 @@ def get_languages(clips_dir: Path, clip_extension: str) -> list[Language]:
     for clip_path in clips_dir.glob(f"**/*.{clip_extension}"):
         language = clip_path.stem
         if language in light_pins_by_language:
-            light = LED(ligt_pins_by_language[language])
+            light = LED(light_pins_by_language[language])
         else:
             light = None
         languages.append(Language(language, clip_path, light))
@@ -293,19 +305,19 @@ def get_languages(clips_dir: Path, clip_extension: str) -> list[Language]:
 def main(
         clips_dir: Path = "clips",
         clip_extension: str = "mp3",
-        sound_device_type: str = "USB Audio Device",
+        sound_device_type: str = "MOTU Phones",
         fallback_time: int = 5 * 60,
-        fadeout_length: int = 20,
+        fadeout_length: int = 2,
         clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout,
         ):
     logging.basicConfig(level=logging.DEBUG)
     languages = get_languages(clips_dir, clip_extension)
     devices =  get_devices(sound_device_type)
-    language_name_to_button = {language_name: Button(button_pin) for language_name, button_pin in button_pins_by_language.items()}
+    key_to_language = {key_name: language_name for language_name, key_name in keys_by_language.items()}
     clip_player = ClipPlayer(
             languages,
             devices,
-            language_name_to_button,
+            key_to_language,
             fallback_time=fallback_time,
             fadeout_length=fadeout_length,
             clip_overlap_strategy=clip_overlap_strategy
