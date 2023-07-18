@@ -219,7 +219,6 @@ class ClipPlayer:
             if self.fadeout_thread:
                 logging.debug(f"Playback thread {self.fadeout_thread.native_id} is fading out, wait!")
                 self.fadeout_thread.join()
-                logging.debug(f"Playback thread {self.fadeout_thread.native_id} is done fading out, go ahead!!")
                 self.fadeout = False
                 self.fadeout_start_time = None
                 self.fadeout_thread = None
