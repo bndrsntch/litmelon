@@ -43,14 +43,14 @@ def get_languages(clips_dir: Path, clip_extension: str, clip_preload_frames: int
 
 def main(
         clips_dir: Path = "clips",
-        clip_extension: str = "mp3",
-        sound_device_type: str = "MOTU Phones",
-        fallback_time: int = 30,
-        fadeout_length: int = 10,
+        clip_extension: str = "wav",
+        sound_device_type: str = "Headphones",
+        fallback_time: int = 20,
+        fadeout_length: int = 6,
         clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout,
-        clip_preload_blocks: int = 100,
-        blocksize: int = 4096,
-        buffersize: int = 24,
+        clip_preload_blocks: int = 250,
+        blocksize: int = 8192,
+        buffersize: int = 12,
         ):
     logging.basicConfig(level=logging.DEBUG)
     languages = get_languages(clips_dir, clip_extension, clip_preload_blocks * blocksize)
