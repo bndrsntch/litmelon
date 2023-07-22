@@ -11,7 +11,7 @@ from pynput import keyboard
 import sounddevice as sd
 
 
-from language import Language
+from language import Language, LanguageThread
 from audio_device import AudioDevice
 
 class ClipOverlapStrategy(str, Enum):
@@ -45,7 +45,7 @@ class ClipPlayer:
     clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout
     last_language: int|None = None
     last_device: int|None = None
-    current_playback_thread: threading.Thread|None = None
+    current_playback_thread: LanguageThread|None = None
     playback_stream: sd.OutputStream|None = None
     fallback_timer: threading.Timer|None = None
     fallback_lock: threading.RLock = field(default_factory=lambda: threading.RLock())
@@ -164,6 +164,9 @@ class ClipPlayer:
         """
         logging.info(f"Start attempt to play {language.name}")
         if self.current_playback_thread and self.current_playback_thread.is_alive():
+            if self.current_playback_thread.language == language:
+                logging.info(f"Already playing {language.name}, skipping this invocation.")
+                return
             if abort_if_playing or self.clip_overlap_strategy == ClipOverlapStrategy.abort:
                 logging.debug(f"Already playing a clip, aborting clip playback.")
                 return
@@ -278,6 +281,6 @@ class ClipPlayer:
             with self.fallback_lock:
                 logging.debug("Resestting fallback clock")
                 self.set_fallback_timer()
-        self.current_playback_thread = threading.Thread(target=_play)
+        self.current_playback_thread = LanguageThread(language=language, target=_play)
         self.current_playback_thread.start()
         logging.info(f"Started playback thread {self.current_playback_thread.native_id} for {language.name}.")

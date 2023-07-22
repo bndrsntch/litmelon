@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, InitVar
 from pathlib import Path
+import threading
 
 from gpiozero import LED
 import numpy as np
@@ -35,3 +36,9 @@ class Language:
         file = sf.SoundFile(self.clip_path, 'r')
         file.seek(self.preloaded_section_end)
         return file
+
+class LanguageThread(threading.Thread):
+
+    def __init__(self, language: Language, *args, **kwargs):
+        self.language = language
+        super().__init__(*args, **kwargs)
