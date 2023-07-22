@@ -245,15 +245,18 @@ class ClipPlayer:
                 # First put the pre-loaded frames into the queue
                 num_preloaded_blocks = language.preloaded_frames.shape[0] / self.blocksize
                 num_preloaded_blocks_to_enqueue = min(num_preloaded_blocks, self.buffersize)
+                logging.debug(f"Will enqueue {num_preloaded_blocks_to_enqueue} of the {num_preloaded_blocks} pre-loaded sound blocks to the playback queue.")
                 for block_idx in range(num_preloaded_blocks_to_enqueue):
                     play_queue.put_nowait(language.preloaded_frames[block_idx*self.blocksize:(block_idx + 1) * self.blocksize])
                 self.playback_stream = sd.OutputStream(samplerate=language.clip_samplerate, device=device.device_index, blocksize=self.blocksize, dtype="float32", channels=2, callback=callback, finished_callback=playback_finished.set)
                 if language.light:
                     language.light.on()
+                logging.debug("Ready to start playback")
                 with self.playback_stream:
                     timeout = self.blocksize * self.buffersize / language.clip_samplerate
-                    logging.debug(f"Timeout: {timeout}")
                     block_idx = num_preloaded_blocks_to_enqueue
+                    if num_preloaded_blocks > block_idx:
+                        logging.debug(f"Will load the remaning {num_preloaded_blocks - block_idx} blocks to the queue.")
                     while num_preloaded_blocks > block_idx:
                         data = language.preloaded_frames[block_idx * self.blocksize:(block_idx+1)*self.blocksize]
                         try:
@@ -263,6 +266,7 @@ class ClipPlayer:
                             # queue is Full we might've just reached the end of playback
                             break
                         block_idx += 1
+                    logging.debug("Start reading from the disk.")
                     while True:
                         data = clip_file.read(self.blocksize, dtype="float32")
                         try:
