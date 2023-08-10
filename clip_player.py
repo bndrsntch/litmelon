@@ -7,12 +7,12 @@ import threading
 import time
 
 import numpy as np
-from pynput import keyboard
 import sounddevice as sd
 
 
 from language import Language, LanguageThread
 from audio_device import AudioDevice
+
 
 class ClipOverlapStrategy(str, Enum):
     """
@@ -39,7 +39,6 @@ class ClipPlayer:
     """
     languages: list[Language]
     devices: list[AudioDevice]
-    key_to_language: dict[str, str] = field(default_factory=lambda: {})
     fallback_time: int = 600 # seconds of silence before random clip is played
     fadeout_length: int = 5 # seconds
     clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout
@@ -64,19 +63,6 @@ class ClipPlayer:
         Starts of the timed thread that plays a random clip if nothing happens for a given amount of time.
         """
         self.set_fallback_timer()
-        listener = keyboard.Listener(on_release=lambda key:self.on_key_press(key))
-        listener.start()
-        self.name_to_language = {language.name: language for language in self.languages}
-
-    def on_key_press(self, key):
-        try:
-            char = str(key.char)
-            if char in self.key_to_language:
-                language_name = self.key_to_language[char]
-                language = self.name_to_language[language_name]
-                self.play_language(language, abort_if_playing=False)
-        except AttributeError:
-            pass
 
     def set_fallback_timer(self):
         """
@@ -185,6 +171,7 @@ class ClipPlayer:
                         logging.debug(f"Set fadeout start time for active playback thread {self.current_playback_thread.native_id}")
                         self.fadeout_start_time = time.time()
                         self.fadeout_thread = self.current_playback_thread
+
         def _play():
             if self.fadeout_thread:
                 logging.debug(f"Playback thread {self.fadeout_thread.native_id} is fading out, wait!")
@@ -201,9 +188,10 @@ class ClipPlayer:
             device = self.get_next_device()
             play_queue = queue.Queue(maxsize=self.buffersize)
             playback_finished = threading.Event()
+
             def callback(outdata, frames, stream_time, status):
                 if status:
-                    logging.warn(status)
+                    logging.warning(status)
                 try:
                     frames_to_play = play_queue.get_nowait()
                 except queue.Empty:
