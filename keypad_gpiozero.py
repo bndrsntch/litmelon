@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
 
-print('''
-##### WARNING #####
-This code is NOT ready yet.
-''')
-
 # I have a new idea:
 #
 # * Create a pseudo-button class that inherits from `HoldMixin` and

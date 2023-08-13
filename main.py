@@ -3,6 +3,7 @@ import logging
 import typing as t
 from enum import Enum
 from pathlib import Path
+import random
 import time
 
 import typer
@@ -15,8 +16,8 @@ from pynput import keyboard
 from language import Language
 from audio_device import AudioDevice
 from clip_player import ClipOverlapStrategy, ClipPlayer
-from interactivity_config import button_numbers_by_language, keys_by_language, light_pins_by_language
-
+from interactivity_config import button_numbers_by_language, keys_by_language, light_pins_by_language, button_by_language
+from keypad_gpiozero import MatrixKeypad
 logging.basicConfig(level=logging.DEBUG)
 
 
@@ -58,10 +59,59 @@ def get_languages(clips_dir: Path, clip_extension: str, clip_preload_frames: int
 class InputReceiver(abc.ABC):
     def look_for_input(self) -> None:
         """
-        This is used by the main event loop to look for new events for input types that do not
+        This is the main event loop to look for new events for input types that do not
         support callbacks.
         """
         pass
+
+
+class ButtonMatrixInputReceiver(InputReceiver):
+    """
+    Receives input from a diode button matrix.
+
+    When multiple keys are pressed, the first key pressed is used, otherwise
+    if they were pressed simultaneously, a random key is chosen.
+    """
+    LABEL_SYMBOLS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    def __init__(self, rowpins: list[int], colpins: list[int], languages: list[Language], callback_fn: t.Callable[[Language], None]):
+        self._rowpins = rowpins
+        self._colpins = colpins
+        self._nrows = len(rowpins)
+        self._ncols = len(colpins)
+        self._nbuttons = self._nrows * self._ncols
+        self._pressed = None # State for which button is currently pressed.
+        self._kp = MatrixKeypad(
+            rows=rowpins,
+            cols=colpins,
+            # MatrixKeypad expects these labels, we could use them but we don't currently
+            labels=[self.LABEL_SYMBOLS[i:i+self._ncols] for i in range(0, self._nbuttons, self._ncols)]
+        )
+        self._kp.output_format = "coords"
+        languages_by_name = {language.name: language for language in languages}
+        self._button_to_language = {
+                button_coord: languages_by_name[language_name]
+                for language_name, button_coord in button_by_language.items()
+        }
+        self._callback_fn = callback_fn
+        self._godmode = False
+
+    def _easter_egg_condition(self, pressed) -> bool:
+        """ Easter egg when all buttons are pressed. Reset to bring it back to normal.
+        """
+        return len(pressed) == self._nbuttons
+
+    def look_for_input(self) -> None:
+        for pressed in self._kp.values:
+            if not self._godmode and self._easter_egg_condition(pressed):
+                self._godmode = True
+                logging.info("easter egg mode")
+            if self._pressed not in pressed:
+                self._pressed = None
+            if self._pressed is None and len(pressed) > 0:
+                self._pressed = random.choice(list(pressed))
+                language = self._button_to_language[self._pressed]
+                self._callback_fn(language)
 
 
 class PynputKeyboardInputReceiver(InputReceiver):
@@ -102,6 +152,7 @@ class ButtonInputReceiver(InputReceiver):
 class InputReceiverType(str, Enum):
     KEYBOARD = "KEYBOARD"
     BUTTON = "BUTTON"
+    BUTTON_MATRIX = "BUTTON_MATRIX"
 
 
 class LedHandler:
@@ -112,9 +163,9 @@ class LedHandler:
 def main(
         clips_dir: Path = "clips",
         clip_extension: str = "wav",
-        sound_device_type: str = "Headphones",
-        input_receiver_type: InputReceiverType = InputReceiverType.KEYBOARD,
-        fallback_time: int = 20,
+        sound_device_type: str = "bcm2835",
+        input_receiver_type: InputReceiverType = InputReceiverType.BUTTON_MATRIX,
+        fallback_time: int = 10,
         fadeout_length: int = 6,
         clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout,
         clip_preload_blocks: int = 250,
@@ -146,14 +197,18 @@ def main(
             languages,
             lambda language: clip_player.play_language(language, abort_if_playing=False)
         )
+    elif input_receiver_type == InputReceiverType.BUTTON_MATRIX:
+        input_receiver = ButtonMatrixInputReceiver(
+            [2, 3], [17, 27],
+            languages,
+            lambda language: clip_player.play_language(language, abort_if_playing=False)
+        )
     else:
         raise NotImplementedError
 
     # TESTING code:
     clip_player.play_random_language()
-    while True:
-        input_receiver.look_for_input()
-        time.sleep(.1)
+    input_receiver.look_for_input()
 
 
 if __name__ == "__main__":

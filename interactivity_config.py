@@ -18,7 +18,14 @@ keys_by_language: dict[str, str] = {
     "quechua": "q",
     "russian": "r",
     "tamil": "s",
-    "turkish": "t"
+    #"turkish": "t"
+}
+
+button_by_language: dict[str, tuple] = {
+    "brazilian_portuguese": (0, 0),
+    "kurdish": (0, 1),
+    "hakka": (1, 0),
+    "russian": (1, 1),
 }
 
 button_numbers_by_language: dict[str, int] = {
@@ -41,7 +48,7 @@ button_numbers_by_language: dict[str, int] = {
     "quechua": "q",
     "russian": "r",
     "tamil": "s",
-    "turkish": "t"
+    #"turkish": "t"
 }
 
 light_pins_by_language: dict[str, str] = {
