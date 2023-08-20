@@ -180,6 +180,12 @@ class MatrixKeypad(HoldMixin, CompositeDevice):
             p.pin.bounce = None
 
     def _read(self):
+        """ Reads the state of the keypad twice and takes their intersection.
+        Janky debouncing hack.
+        """
+        return self._single_read() & self._single_read()
+
+    def _single_read(self):
         """
         Reads the actual state of the keypad.
 
@@ -205,21 +211,21 @@ class MatrixKeypad(HoldMixin, CompositeDevice):
             pressed = set()
             self._last_read_was_ambiguous = False
             potentially_ambiguous = False
-            for rowno, row in enumerate(self.row_pins):
-                # Set this row as active, pulling it low.
-                row.pin.output_with_state(0)
+            for colno, col in enumerate(self.col_pins):
+                # Set this col as active, pulling it low.
+                col.pin.output_with_state(0)
 
-                # If a button is pressed in this row, we expect to read it from the column.
-                for colno, col in enumerate(self.col_pins):
-                    if col.pin.state == 0:
+                # If a button is pressed in this col, we expect to read it from the column.
+                for rowno, row in enumerate(self.row_pins):
+                    if row.pin.state == 0:
                         pressed.add((rowno, colno))
 
-                for rowno2, row2 in enumerate(self.row_pins):
-                    if rowno2 != rowno:
-                        if row2.pin.state == 0:
+                for colno2, col2 in enumerate(self.col_pins):
+                    if colno2 != colno:
+                        if col2.pin.state == 0:
                             potentially_ambiguous = True
 
-                row.pin.input_with_pull('up')
+                col.pin.input_with_pull('up')
 
             if potentially_ambiguous:
                 self._last_read_was_ambiguous = self.is_it_ambiguous(pressed)
@@ -302,16 +308,14 @@ class MatrixKeypad(HoldMixin, CompositeDevice):
 if __name__ == "__main__":
     kp = MatrixKeypad(
         # pin 21 is not used in this 3x4 matrix
-        rows=[2, 3],
-        cols=[17, 27],
-        labels=["12", "45"],
+        rows=[2, 3, 4],
+        cols=[17, 27, 22, 5, 6, 13, 19, 26],
+        labels=["qwertyui", "asdfghjk", "zxcvbnm0"],
     )
 
     import time
     kp.output_format = "coords"
-    while True:
-        for value in kp.values:
-             print(value)
-        time.sleep(.1)
+    for value in kp.values:
+         print(value)
 
     input('Press Enter to quit.')
