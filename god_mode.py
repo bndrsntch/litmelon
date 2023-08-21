@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import os
-import re
 import shutil
 from pathlib import Path
 from typing import List, Tuple
@@ -10,11 +9,6 @@ import numpy
 import pygame
 import soundfile
 
-ANCHOR_INDICATOR = " anchor"
-ANCHOR_NOTE_REGEX = re.compile(r"\s[abcdefg]$")
-DESCRIPTOR_32BIT = "FLOAT"
-BITS_32BIT = 32
-AUDIO_ALLOWED_CHANGES_HARDWARE_DETERMINED = 0
 # ONLY SET TO 500ms for BOWLS
 SOUND_FADE_MILLISECONDS = 500
 
@@ -62,7 +56,8 @@ def get_or_create_key_sounds(
                     for i in range(channels)
                 ]
                 sound = numpy.ascntiguousarray(numpy.vstack(new_channels).T)
-            soundfile.write(cached_path, sound, sample_rate_hz, DESCRIPTOR_32BIT)
+            soundfile.write(cached_path, sound, sample_rate_hz, 32)
+
         sounds.append(sound)
 
     return [pygame.sndarray.make_sound(sound) for sound in sounds]
@@ -79,16 +74,9 @@ def get_audio_data(wav_path: str) -> Tuple:
 
 
 class GodModeHandler:
-    def __init__(self, sound_device_name: str):
+    def __init__(self):
         wav_path = os.path.join(CURRENT_WORKING_DIR, "instrumentation/bowl_c6.wav")
         audio_data, framerate_hz, channels = get_audio_data(wav_path)
-        pygame.mixer.init(
-            framerate_hz,
-            BITS_32BIT,
-            channels,
-            devicename=sound_device_name,
-            allowedchanges=AUDIO_ALLOWED_CHANGES_HARDWARE_DETERMINED,
-        )
         tones = [-22, -20, -17, -15, -12, -10, -8, -5, -3, 0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31, 33]
         tones = [t - 12 for t in tones]
         self._key_sounds = get_or_create_key_sounds(

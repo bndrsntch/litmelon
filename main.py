@@ -1,11 +1,14 @@
 import abc
 import logging
-import typing as t
+import re
+import sys
 from enum import Enum
+from multiprocessing import Pool
 from pathlib import Path
 import random
 import time
 
+import pygame
 import typer
 import sounddevice as sd
 
@@ -14,55 +17,21 @@ from gpiozero import LED
 from pynput import keyboard
 
 from god_mode import GodModeHandler
-from language import Language
-from audio_device import AudioDevice
-from clip_player import ClipOverlapStrategy, ClipPlayer
-from interactivity_config import button_numbers_by_language, keys_by_language, light_pins_by_language, \
+from interactivity_config import keys_by_language, \
     button_by_language, buttons_to_letters
 from keypad_gpiozero import MatrixKeypad
+from pygame_clip_player import PygameClipPlayer
 
 logging.basicConfig(level=logging.DEBUG)
 
-
-def get_devices(name_filter: str) -> list[AudioDevice]:
-    """
-    Use the `sounddevice` library to construct a list of all audio devices whose names contain the `name_filter` as a substring.
-    """
-    all_devices = sd.query_devices()
-    devices = [AudioDevice(device['index'], channel, device['name'])
-               for device in all_devices for channel in range(0, 2) if name_filter in device["name"]]
-    logging.info(f"Initialized with devices: {devices}")
-    if len(devices) == 0:
-        logging.error(f"Available devices {all_devices}")
-        raise Exception(f"No devices found with filter [{name_filter}]")
-
-    return devices
-
-
-def get_languages(clips_dir: Path, clip_extension: str, clip_preload_frames: int) -> list[Language]:
-    """
-    Initialize all languages by loading audio clips from `clips_dir` who have the `clip_extension` file extension.
-    Also load any light mappings from `interactivity_config.py`
-    """
-    languages = []
-    for clip_path in clips_dir.glob(f"**/*.{clip_extension}"):
-        language = clip_path.stem
-        if language in light_pins_by_language:
-            light = LED(light_pins_by_language[language])
-        else:
-            light = None
-        languages.append(Language(language, clip_path, clip_preload_frames, light))
-        logging.info(f"Loaded {language}.")
-    logging.info(f"Loaded {len(languages)} clips.")
-    if len(languages) == 0:
-        raise Exception(f"No [{clip_extension}] files found in [{clips_dir}]")
-    return languages
+numba_logger = logging.getLogger("numba")
+numba_logger.setLevel(level=logging.WARNING)
 
 
 class InputReceiver(abc.ABC):
-    def __init__(self, clip_player: ClipPlayer, god_mode_handler: GodModeHandler):
+    def __init__(self, clip_player: PygameClipPlayer, god_mode_handler: GodModeHandler):
         self._clip_player = clip_player
-        self._god_mode = False
+        self._god_mode = True
         self._god_mode_handler = god_mode_handler
         self._last_god_mode_start = None
 
@@ -83,8 +52,13 @@ class ButtonMatrixInputReceiver(InputReceiver):
     """
     LABEL_SYMBOLS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    def __init__(self, clip_player: ClipPlayer, god_mode_handler: GodModeHandler, rowpins: list[int], colpins: list[int],
-                 languages: list[Language]):
+    def __init__(
+        self,
+        clip_player: PygameClipPlayer,
+        god_mode_handler: GodModeHandler,
+        rowpins: list[int],
+        colpins: list[int],
+    ):
         super().__init__(clip_player, god_mode_handler)
         self._rowpins = rowpins
         self._colpins = colpins
@@ -95,13 +69,12 @@ class ButtonMatrixInputReceiver(InputReceiver):
         self._kp = MatrixKeypad(
             rows=rowpins,
             cols=colpins,
-            # MatrixKeypad expects these labels, we could use them but we don't currently
+            # MatrixKeypad expects these labels, we could use them, but we don't currently
             labels=[self.LABEL_SYMBOLS[i:i + self._ncols] for i in range(0, self._nbuttons, self._ncols)]
         )
         self._kp.output_format = "coords"
-        languages_by_name = {language.name: language for language in languages}
         self._button_to_language = {
-            button_coord: languages_by_name[language_name]
+            button_coord: language_name
             for language_name, button_coord in button_by_language.items()
         }
         self._key_states = {
@@ -137,6 +110,10 @@ class ButtonMatrixInputReceiver(InputReceiver):
         return len(pressed) == self._nbuttons
 
     def look_for_input(self) -> None:
+        if not self._god_mode and self._clip_player.is_idle:
+            self._clip_player.play_random_language()
+            return
+
         for pressed in self._kp.values:
             if not self._god_mode and self._easter_egg_condition(pressed):
                 self._god_mode = True
@@ -144,7 +121,7 @@ class ButtonMatrixInputReceiver(InputReceiver):
                 # TODO: GET THE CLIP PLAYER TO STOP
                 logging.info("easter egg mode")
 
-            if self._god_mode and time.time() - self._last_god_mode_start > ClipPlayer.fallback_time:
+            if self._god_mode and time.time() - self._last_god_mode_start > 300:
                 self._god_mode = False
                 self._last_god_mode_start = None
                 self._clip_player.play_random_language()
@@ -170,7 +147,7 @@ class ButtonMatrixInputReceiver(InputReceiver):
                 if not self._god_mode:
                     self._pressed = random.choice(list(pressed))
                     language = self._button_to_language[self._pressed]
-                    self._clip_player.play_language(language, abort_if_playing=False)
+                    self._clip_player.play_language(language)
                 else:
                     for coords in key_down:
                         self._god_mode_handler.on_press(coords)
@@ -180,11 +157,10 @@ class ButtonMatrixInputReceiver(InputReceiver):
 
 
 class PynputKeyboardInputReceiver(InputReceiver):
-    def __init__(self, clip_player: ClipPlayer, god_mode_handler: GodModeHandler, languages: list[Language]):
+    def __init__(self, clip_player: PygameClipPlayer, god_mode_handler: GodModeHandler):
         super().__init__(clip_player, god_mode_handler)
-        languages_by_name = {language.name: language for language in languages}
         self._key_to_language = {
-            key_name: languages_by_name[language_name]
+            key_name: language_name
             for language_name, key_name in keys_by_language.items()
         }
         listener = keyboard.Listener(on_release=lambda key: self._on_key_press(key),
@@ -192,7 +168,7 @@ class PynputKeyboardInputReceiver(InputReceiver):
         listener.start()
 
     def _check_for_god_mode(self):
-        if self._god_mode and time.time() - self._last_god_mode_start > ClipPlayer.fallback_time:
+        if self._god_mode and time.time() - self._last_god_mode_start > 300:
             self._god_mode = False
             self._last_god_mode_start = None
             self._clip_player.play_random_language()
@@ -204,7 +180,7 @@ class PynputKeyboardInputReceiver(InputReceiver):
             if not self._god_mode:
                 if str(char) in self._key_to_language:
                     language = self._key_to_language[char]
-                    self._clip_player.play_language(language, abort_if_playing=False)
+                    self._clip_player.play_language(language)
             else:
                 for k, v in buttons_to_letters.items():
                     if str(char) == v:
@@ -219,7 +195,8 @@ class PynputKeyboardInputReceiver(InputReceiver):
                         self._god_mode_handler.on_release(k)
 
     def look_for_input(self) -> None:
-        pass
+        if not self._god_mode and self._clip_player.is_idle:
+            self._clip_player.play_random_language()
 
 
 class InputReceiverType(str, Enum):
@@ -228,53 +205,75 @@ class InputReceiverType(str, Enum):
     BUTTON_MATRIX = "BUTTON_MATRIX"
 
 
+def _run(
+    clips_dir: Path,
+    clip_extension: str,
+    input_receiver_type: InputReceiverType,
+    device_name: str,
+    fadeout_length_ms: int,
+):
+    try:
+        pygame.mixer.init(
+            # Verified that current clip mp3 and instrumentation wav are 48_000
+            # Seems better to just centralize rather than reinitialize the sample
+            # rate of the mixer every time we change a track
+            48_000,
+            size=32,
+            channels=1,
+            devicename=device_name,
+            allowedchanges=0,
+        )
+        clip_player = PygameClipPlayer(
+            clips_dir,
+            clip_extension,
+            fadeout_length_ms=fadeout_length_ms,
+        )
+        god_mode_handler = GodModeHandler()
+        if input_receiver_type == InputReceiverType.KEYBOARD:
+            input_receiver = PynputKeyboardInputReceiver(
+                clip_player,
+                god_mode_handler,
+            )
+        elif input_receiver_type == InputReceiverType.BUTTON_MATRIX:
+            input_receiver = ButtonMatrixInputReceiver(
+                clip_player,
+                god_mode_handler,
+                [2, 3], [17, 27],
+            )
+        else:
+            raise NotImplementedError
+
+        while True:
+            input_receiver.look_for_input()
+    except Exception as e:
+        print(device_name)
+        print(e, file=sys.stderr)
+
+
 def main(
-        clips_dir: Path = "clips",
-        clip_extension: str = "wav",
-        sound_device_type: str = "bcm2835",
-        input_receiver_type: InputReceiverType = InputReceiverType.BUTTON_MATRIX,
-        fallback_time: int = 10,
-        fadeout_length: int = 6,
-        clip_overlap_strategy: ClipOverlapStrategy = ClipOverlapStrategy.fadeout,
-        clip_preload_blocks: int = 250,
-        blocksize: int = 8192,
-        buffersize: int = 12,
+    clips_dir: Path = "clips",
+    clip_extension: str = "mp3",
+    sound_device_type_pattern: str = r"bcm2835",
+    input_receiver_type: InputReceiverType = InputReceiverType.BUTTON_MATRIX,
+    fadeout_length_ms: int = 6000,
 ):
     logging.basicConfig(level=logging.DEBUG)
-    languages = get_languages(clips_dir, clip_extension, clip_preload_blocks * blocksize)
-    devices = get_devices(sound_device_type)
+    device_names = [
+        d["name"] for d in sd.query_devices()
+        if re.match(sound_device_type_pattern, d["name"]) is not None
+    ]
 
-    clip_player = ClipPlayer(
-        languages,
-        devices,
-        fallback_time=fallback_time,
-        fadeout_length=fadeout_length,
-        clip_overlap_strategy=clip_overlap_strategy,
-        blocksize=blocksize,
-        buffersize=buffersize,
-    )
-
-    # TODO: FIGURE OUT HOW TO GET THIS OVER MULTIPLE DEVICES
-    god_mode_handler = GodModeHandler(devices[0].name)
-    if input_receiver_type == InputReceiverType.KEYBOARD:
-        input_receiver = PynputKeyboardInputReceiver(
-            clip_player,
-            god_mode_handler,
-            languages,
+    with Pool(len(device_names)) as p:
+        p.starmap(
+            _run,
+            [(
+                clips_dir,
+                clip_extension,
+                input_receiver_type,
+                device_name,
+                fadeout_length_ms
+            ) for device_name in device_names]
         )
-    elif input_receiver_type == InputReceiverType.BUTTON_MATRIX:
-        input_receiver = ButtonMatrixInputReceiver(
-            clip_player,
-            god_mode_handler,
-            [2, 3], [17, 27],
-            languages,
-        )
-    else:
-        raise NotImplementedError
-
-    # TESTING code:
-    while True:
-        input_receiver.look_for_input()
 
 
 if __name__ == "__main__":
