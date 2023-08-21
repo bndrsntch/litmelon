@@ -9,7 +9,8 @@ class AudioDevice:
     """
     device_index: int
     channel: int
+    name: str
 
     @cache
     def __hash__(self):
-        return (self.device_index, self.channel)
+        return self.device_index, self.channel

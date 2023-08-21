@@ -18,7 +18,7 @@ keys_by_language: dict[str, str] = {
     "quechua": "q",
     "russian": "r",
     "tamil": "s",
-    #"turkish": "t"
+    # "turkish": "t"
 }
 
 button_by_language: dict[str, tuple] = {
@@ -26,6 +26,60 @@ button_by_language: dict[str, tuple] = {
     "kurdish": (0, 1),
     "hakka": (1, 0),
     "russian": (1, 1),
+}
+
+buttons_to_letters: dict[tuple[int, int], str] = {
+    (0, 0): "z",
+    (0, 1): "x",
+    (0, 2): "c",
+    (0, 3): "v",
+    (0, 4): "b",
+    (0, 5): "n",
+    (0, 6): "m",
+    (0, 7): ",",
+    (1, 0): "a",
+    (1, 1): "s",
+    (1, 2): "d",
+    (1, 3): "f",
+    (1, 4): "g",
+    (1, 5): "h",
+    (1, 6): "j",
+    (1, 7): "k",
+    (2, 0): "q",
+    (2, 1): "w",
+    (2, 2): "e",
+    (2, 3): "r",
+    (2, 4): "t",
+    (2, 5): "y",
+    (2, 6): "u",
+    (2, 7): "i",
+}
+
+button_coords_to_tone_index: dict[str, tuple] = {
+    (0, 0): 0,
+    (0, 1): 1,
+    (0, 2): 2,
+    (0, 3): 3,
+    (0, 4): 4,
+    (0, 5): 5,
+    (0, 6): 6,
+    (0, 7): 7,
+    (1, 0): 8,
+    (1, 1): 9,
+    (1, 2): 10,
+    (1, 3): 11,
+    (1, 4): 12,
+    (1, 5): 13,
+    (1, 6): 14,
+    (1, 7): 15,
+    (2, 0): 16,
+    (2, 1): 17,
+    (2, 2): 18,
+    (2, 3): 19,
+    (2, 4): 20,
+    (2, 5): 21,
+    (2, 6): 22,
+    (2, 7): 23,
 }
 
 button_numbers_by_language: dict[str, int] = {
@@ -48,7 +102,7 @@ button_numbers_by_language: dict[str, int] = {
     "quechua": "q",
     "russian": "r",
     "tamil": "s",
-    #"turkish": "t"
+    # "turkish": "t"
 }
 
 light_pins_by_language: dict[str, str] = {

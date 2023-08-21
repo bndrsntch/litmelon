@@ -51,6 +51,7 @@ from threading import Lock
 from gpiozero.devices import CompositeDevice, GPIODevice
 from gpiozero.mixins import HoldMixin
 
+
 class MatrixKeypad(HoldMixin, CompositeDevice):
     # TODO: Convert this into a nicely formatted docstring.
     # TODO: Check if all the docstrings are properly formatted.

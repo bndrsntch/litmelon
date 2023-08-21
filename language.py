@@ -37,6 +37,7 @@ class Language:
         file.seek(self.preloaded_section_end)
         return file
 
+
 class LanguageThread(threading.Thread):
 
     def __init__(self, language: Language, *args, **kwargs):
