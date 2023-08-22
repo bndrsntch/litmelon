@@ -56,9 +56,16 @@ class PygameClipPlayer:
             print("fading out")
             self._current_sound.fadeout(self._fadeout_length_ms)
 
-        sound = self.language_sounds_by_name[language_name]
+        clip_path = self.language_sounds_by_name[language_name]
+        sound = pygame.mixer.Sound(clip_path)
         sound.play(fade_ms=self._fadeout_length_ms)
         self._current_sound = sound
+
+    def stop_playing(self) -> None:
+        self._current_sound.stop()
+        self._current_sound = None
+        self._started_last_transition = None
+        self._current_clip_started_at = None
 
     def play_random_language(self) -> None:
         return self.play_language(random.choice(list(self.language_sounds_by_name.keys())))

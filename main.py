@@ -12,8 +12,6 @@ import pygame
 import typer
 import sounddevice as sd
 
-from gpiozero import LED
-
 from pynput import keyboard
 
 from god_mode import GodModeHandler
@@ -118,7 +116,7 @@ class ButtonMatrixInputReceiver(InputReceiver):
             if not self._god_mode and self._easter_egg_condition(pressed):
                 self._god_mode = True
                 self._last_god_mode_start = time.time()
-                # TODO: GET THE CLIP PLAYER TO STOP
+                self._clip_player.stop_playing()
                 logging.info("easter egg mode")
 
             if self._god_mode and time.time() - self._last_god_mode_start > 300:
