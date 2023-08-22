@@ -12,11 +12,9 @@ class PygameClipPlayer:
     def __init__(self, clips_dir: Path, clip_extension: str = "mp3", fadeout_length_ms: int = 6000):
         self._fadeout_length_ms = fadeout_length_ms
 
-        self.language_sounds_by_name: dict[str, Sound] = {}
+        self.language_sounds_by_name: dict[str, str] = {}
         for clip_path in clips_dir.glob(f"**/*.{clip_extension}"):
-            audio_data, _ = librosa.load(clip_path, sr=48_000, mono=True)
-            sound = pygame.sndarray.make_sound(audio_data)
-            self.language_sounds_by_name[clip_path.name.removesuffix(f".{clip_extension}")] = sound
+            self.language_sounds_by_name[clip_path.name.removesuffix(f".{clip_extension}")] = clip_path
 
         self._current_sound: t.Optional[Sound] = None
         self._current_clip_started_at: t.Optional[float] = None
